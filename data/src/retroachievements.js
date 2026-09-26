@@ -16,6 +16,28 @@ async function loginRA(username, password) {
     }
 }
 
+async function loginWithApiKey(username, apiKey) {
+  // Validate API key by fetching the user's summary
+  const targetUrl = `https://retroachievements.org/API/API_GetUserSummary.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(apiKey)}`;
+  const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+
+  const res = await fetch(proxiedUrl);
+  const data = await res.json();
+
+  // If valid, User profile data is returned with points
+  if (data && (data.Points !== undefined || data.User === username)) {
+    localStorage.setItem('ra_user', username);
+    localStorage.setItem('ra_token', apiKey);
+    localStorage.setItem('ra_score', data.Points || 0);
+    localStorage.setItem('ra_hardcore_points', data.Points || 0);
+    localStorage.setItem('ra_softcore_points', data.SoftcorePoints || 0);
+    localStorage.setItem('ra_rank', data.Rank || '—');
+    return data;
+  } else {
+    throw new Error('Invalid Username or API Key');
+  }
+}
+
 async function getUserPoints(username, token) {
     const targetUrl = `https://retroachievements.org/API/API_GetUserPoints.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(token)}`;
     const url = getProxiedUrl(targetUrl);
@@ -38,6 +60,10 @@ import { rc_parse_trigger, rc_evaluate_trigger, rc_evaluate_richpresence } from 
 class RetroAchievements {
     static async loginRA(username, password) {
         return await loginRA(username, password);
+    }
+
+    static async loginWithApiKey(username, apiKey) {
+        return await loginWithApiKey(username, apiKey);
     }
 
     constructor(ejs) {
@@ -447,4 +473,4 @@ class RetroAchievements {
     }
 }
 
-export { RetroAchievements, loginRA, getUserPoints, getUserRecentlyPlayedGames, getProxiedUrl };
+export { RetroAchievements, loginRA, loginWithApiKey, getUserPoints, getUserRecentlyPlayedGames, getProxiedUrl };

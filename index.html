@@ -637,10 +637,21 @@ img{display:block}
         <!-- Logged Out State -->
         <div id="raLoginFormWrap">
           <h3>RetroAchievements Integration</h3>
-          <p>Connect your RetroAchievements.org account with your Username and Password.</p>
+          <p>Connect your RetroAchievements.org account with your Username and Web API Key or Password.</p>
           <form id="raLoginForm" class="ach-ra-form" onsubmit="return false;">
             <input type="text" id="raUsername" placeholder="Username" class="form-input" required>
-            <input type="password" id="raPassword" placeholder="Password" class="form-input" required>
+            <div id="apiKeyFields">
+              <input type="password" id="raApiKey" placeholder="Web API Key" class="form-input" style="margin-bottom:4px;">
+              <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">
+                <a href="https://retroachievements.org/settings" target="_blank" rel="noopener noreferrer" style="color:var(--green);text-decoration:underline;">[Get your API Key from RetroAchievements Settings]</a>
+              </div>
+            </div>
+            <div id="passwordFields" style="display:none;">
+              <input type="password" id="raPassword" placeholder="Password" class="form-input" style="margin-bottom:8px;">
+            </div>
+            <div style="margin-bottom:8px;">
+              <button type="button" id="toggleAuthModeBtn" style="font-size:12px;color:var(--text2);text-decoration:underline;cursor:pointer;">Or log in with Password</button>
+            </div>
             <button type="submit" class="ach-save-btn" id="loginRaBtn">Log In</button>
           </form>
           <div id="raLoginError" style="margin-top:10px;font-size:12px;color:var(--red);display:none"></div>
@@ -655,7 +666,8 @@ img{display:block}
                 <span id="raProfileUsername" class="ra-username"></span>
                 <span class="ra-live-badge">🟢 Connected</span>
               </div>
-              <div id="raProfileScore" class="ra-score">🏆 0 Points</div>
+              <div id="raProfileScore" class="ra-score">🏆 Hardcore: 0 | Softcore: 0</div>
+              <div id="raProfileRank" style="font-size:11px;color:var(--text3);margin-top:2px;">Rank: —</div>
             </div>
           </div>
           <button id="logoutRaBtn" class="ra-logout-btn">Log Out</button>
@@ -1091,7 +1103,10 @@ window._demoAch=()=>showAchievementToast({title:'First Blood',description:'Beat 
 // ══════════════════════════════════════════════
 function updateRaUI() {
   const raUser = localStorage.getItem('ra_user');
+  const raHardcore = localStorage.getItem('ra_hardcore_points');
+  const raSoftcore = localStorage.getItem('ra_softcore_points');
   const raScore = localStorage.getItem('ra_score') || 0;
+  const raRank = localStorage.getItem('ra_rank');
   const loginWrap = document.getElementById('raLoginFormWrap');
   const profileCard = document.getElementById('raProfileCard');
 
@@ -1101,7 +1116,17 @@ function updateRaUI() {
 
     document.getElementById('raAvatar').src = `https://media.retroachievements.org/UserPic/${raUser}.png`;
     document.getElementById('raProfileUsername').textContent = raUser;
-    document.getElementById('raProfileScore').textContent = `🏆 ${Number(raScore).toLocaleString()} Points`;
+    if (raHardcore !== null || raSoftcore !== null) {
+      const hc = Number(raHardcore || 0).toLocaleString();
+      const sc = Number(raSoftcore || 0).toLocaleString();
+      document.getElementById('raProfileScore').textContent = `🏆 Hardcore: ${hc} | Softcore: ${sc}`;
+    } else {
+      document.getElementById('raProfileScore').textContent = `🏆 ${Number(raScore).toLocaleString()} Points`;
+    }
+    const rankEl = document.getElementById('raProfileRank');
+    if (rankEl) {
+      rankEl.textContent = (raRank && raRank !== '—') ? `Rank: ${raRank}` : 'Rank: —';
+    }
   } else {
     loginWrap.classList.remove('hidden');
     profileCard.classList.add('hidden');
@@ -1308,15 +1333,33 @@ document.getElementById('clearLibraryBtn').onclick=async()=>{
 // ══════════════════════════════════════════════
 //  ACHIEVEMENTS FORM & PROFILE CARD
 // ══════════════════════════════════════════════
+let authMode = 'apikey'; // 'apikey' | 'password'
+
+const toggleAuthBtn = document.getElementById('toggleAuthModeBtn');
+if (toggleAuthBtn) {
+  toggleAuthBtn.onclick = () => {
+    if (authMode === 'apikey') {
+      authMode = 'password';
+      document.getElementById('apiKeyFields').style.display = 'none';
+      document.getElementById('passwordFields').style.display = 'block';
+      toggleAuthBtn.textContent = 'Or log in with Web API Key';
+    } else {
+      authMode = 'apikey';
+      document.getElementById('apiKeyFields').style.display = 'block';
+      document.getElementById('passwordFields').style.display = 'none';
+      toggleAuthBtn.textContent = 'Or log in with Password';
+    }
+  };
+}
+
 document.getElementById('loginRaBtn').onclick = async (e) => {
   e.preventDefault();
   const u = document.getElementById('raUsername').value.trim();
-  const p = document.getElementById('raPassword').value.trim();
   const errEl = document.getElementById('raLoginError');
   errEl.style.display = 'none';
 
-  if (!u || !p) {
-    errEl.textContent = 'Please enter both username and password';
+  if (!u) {
+    errEl.textContent = 'Please enter a username';
     errEl.style.display = 'block';
     return;
   }
@@ -1326,9 +1369,23 @@ document.getElementById('loginRaBtn').onclick = async (e) => {
   btn.textContent = 'Logging in...';
 
   try {
-    const { loginRA } = await import('./data/src/retroachievements.js');
-    await loginRA(u, p);
-    document.getElementById('raPassword').value = '';
+    if (authMode === 'apikey') {
+      const apiKey = document.getElementById('raApiKey').value.trim();
+      if (!apiKey) {
+        throw new Error('Please enter your Web API Key');
+      }
+      const { loginWithApiKey } = await import('./data/src/retroachievements.js');
+      await loginWithApiKey(u, apiKey);
+      document.getElementById('raApiKey').value = '';
+    } else {
+      const p = document.getElementById('raPassword').value.trim();
+      if (!p) {
+        throw new Error('Please enter your password');
+      }
+      const { loginRA } = await import('./data/src/retroachievements.js');
+      await loginRA(u, p);
+      document.getElementById('raPassword').value = '';
+    }
     await renderAchievementsPage();
   } catch (err) {
     errEl.textContent = err.message || 'Invalid credentials';
@@ -1343,6 +1400,9 @@ document.getElementById('logoutRaBtn').onclick = () => {
   localStorage.removeItem('ra_user');
   localStorage.removeItem('ra_token');
   localStorage.removeItem('ra_score');
+  localStorage.removeItem('ra_hardcore_points');
+  localStorage.removeItem('ra_softcore_points');
+  localStorage.removeItem('ra_rank');
   localStorage.removeItem('ejs-retroachievements-config');
   renderAchievementsPage();
 };
