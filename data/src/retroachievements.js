@@ -17,24 +17,35 @@ async function loginRA(username, password) {
 }
 
 async function loginWithApiKey(username, apiKey) {
-  // Validate API key by fetching the user's summary
   const targetUrl = `https://retroachievements.org/API/API_GetUserSummary.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(apiKey)}`;
   const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
 
   const res = await fetch(proxiedUrl);
   const data = await res.json();
 
-  // If valid, User profile data is returned with points
-  if (data && (data.Points !== undefined || data.User === username)) {
+  // RetroAchievements returns TotalPoints or ID on valid authentication
+  // On invalid key, it returns { message: "Unauthenticated." } or status 419/401
+  if (data && (data.TotalPoints !== undefined || data.Points !== undefined || data.ID !== undefined)) {
+    const hardcore = data.TotalPoints ?? data.Points ?? 0;
+    const softcore = data.TotalSoftcorePoints ?? data.SoftcorePoints ?? 0;
+    const rank = data.Rank ?? '—';
+
     localStorage.setItem('ra_user', username);
     localStorage.setItem('ra_token', apiKey);
-    localStorage.setItem('ra_score', data.Points || 0);
-    localStorage.setItem('ra_hardcore_points', data.Points || 0);
-    localStorage.setItem('ra_softcore_points', data.SoftcorePoints || 0);
-    localStorage.setItem('ra_rank', data.Rank || '—');
-    return data;
+    localStorage.setItem('ra_hardcore_points', hardcore);
+    localStorage.setItem('ra_softcore_points', softcore);
+    localStorage.setItem('ra_rank', rank);
+
+    return {
+      user: username,
+      hardcore,
+      softcore,
+      rank,
+      userPic: data.UserPic ? `https://media.retroachievements.org${data.UserPic}` : `https://media.retroachievements.org/UserPic/${username}.png`
+    };
   } else {
-    throw new Error('Invalid Username or API Key');
+    const errMsg = data?.message || data?.errors?.[0]?.title || 'Invalid Username or API Key';
+    throw new Error(errMsg);
   }
 }
 
