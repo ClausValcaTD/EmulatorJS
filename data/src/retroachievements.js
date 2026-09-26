@@ -1,4 +1,3 @@
-
 async function loginRA(username, password) {
     const url = `https://retroachievements.org/dorequest.php?r=login&u=${encodeURIComponent(username)}&p=${encodeURIComponent(password)}`;
     const res = await fetch(url);
@@ -14,6 +13,7 @@ async function loginRA(username, password) {
 }
 
 import { md5 } from "./utils.js";
+import { rc_parse_trigger, rc_evaluate_trigger, rc_evaluate_richpresence } from "./rcheevos/rcheevos.js";
 
 class RetroAchievements {
     static async loginRA(username, password) {
@@ -29,6 +29,10 @@ class RetroAchievements {
         this.romMd5 = null;
         this.unlockedIds = new Set();
         this._pollInterval = null;
+        this._pingInterval = null;
+        this.richPresenceScript = "";
+        this.richPresenceText = "";
+        this.frameCount = 0;
         this.loadConfig();
     }
 
@@ -70,6 +74,27 @@ class RetroAchievements {
         };
 
         localStorage.setItem("ejs-retroachievements-config", JSON.stringify(config));
+    }
+
+    peek(address, numBytes) {
+        if (typeof window === "undefined" || !window.Module || typeof window.Module._retro_get_memory_data !== "function") {
+            return 0;
+        }
+        const ramPtr = window.Module._retro_get_memory_data(0); // RETRO_MEMORY_SYSTEM_RAM = 0
+        const ramSize = window.Module._retro_get_memory_size(0);
+        if (!ramPtr || !ramSize || address < 0 || address >= ramSize) {
+            return 0;
+        }
+        const heap = window.Module.HEAPU8;
+        if (!heap) return 0;
+
+        let val = 0;
+        for (let i = 0; i < numBytes; i++) {
+            if (address + i < ramSize) {
+                val |= (heap[ramPtr + address + i] << (i * 8));
+            }
+        }
+        return val >>> 0;
     }
 
     async initGame(romBytes) {
@@ -124,16 +149,50 @@ class RetroAchievements {
                 });
             }
             if (this.ejs.debug) console.log("[RetroAchievements] Session started. Unlocked count:", this.unlockedIds.size);
+
+            this.startPingInterval();
         } catch (e) {
             if (this.ejs.debug) console.warn("[RetroAchievements] Failed to start session:", e);
         }
     }
 
+    startPingInterval() {
+        this.stopPingInterval();
+        this.sendPing();
+        this._pingInterval = setInterval(() => {
+            this.sendPing();
+        }, 120000); // Send keep-alive ping every 2 minutes
+    }
+
+    stopPingInterval() {
+        if (this._pingInterval) {
+            clearInterval(this._pingInterval);
+            this._pingInterval = null;
+        }
+    }
+
+    async sendPing() {
+        if (!this.username || !this.token || !this.gameId) return;
+        try {
+            const richText = this.richPresenceText || ("Playing " + (this.gameData?.Title || "Game"));
+            const url = `${this.baseUrl}?r=ping`
+                + `&u=${encodeURIComponent(this.username)}`
+                + `&t=${encodeURIComponent(this.token)}`
+                + `&g=${this.gameId}`
+                + `&m=${encodeURIComponent(richText)}`;
+            await fetch(url);
+            if (this.ejs.debug) console.log("[RetroAchievements] Pinged Rich Presence:", richText);
+        } catch (e) {
+            if (this.ejs.debug) console.warn("[RetroAchievements] Ping failed:", e);
+        }
+    }
+
     startAchievementPolling() {
         if (this._pollInterval) return;
+        this.frameCount = 0;
         this._pollInterval = setInterval(() => {
             this.checkAchievements();
-        }, 500); // check every 500ms
+        }, 16); // Poll every ~16ms (~60 FPS)
     }
 
     stopAchievementPolling() {
@@ -141,24 +200,36 @@ class RetroAchievements {
             clearInterval(this._pollInterval);
             this._pollInterval = null;
         }
+        this.stopPingInterval();
     }
 
     checkAchievements() {
-        if (!this.achievements || this.achievements.length === 0) return;
+        this.frameCount++;
 
-        // TODO: requires gameManager memory read API
-        if (!this.ejs.gameManager || typeof this.ejs.gameManager.getRetroVariable !== "function") {
-            return;
-        }
+        const peekFn = (addr, numBytes) => this.peek(addr, numBytes);
 
-        for (const achievement of this.achievements) {
-            const achId = achievement.ID || achievement.id;
-            if (achId === undefined || this.unlockedIds.has(Number(achId))) continue;
+        // Every 60 frames (~1s), evaluate triggers & Rich Presence
+        if (this.frameCount % 60 === 0) {
+            if (this.richPresenceScript) {
+                this.richPresenceText = rc_evaluate_richpresence(this.richPresenceScript, peekFn);
+            }
 
-            // Evaluate memory condition if address is available
-            const conditionMet = false; // Stub until memory read API is available
-            if (conditionMet) {
-                this.awardAchievement(achievement);
+            if (this.achievements && this.achievements.length > 0) {
+                for (const achievement of this.achievements) {
+                    const achId = achievement.ID || achievement.id;
+                    if (achId === undefined || this.unlockedIds.has(Number(achId))) continue;
+
+                    if (!achievement._parsedTrigger && achievement.MemAddr) {
+                        achievement._parsedTrigger = rc_parse_trigger(achievement.MemAddr);
+                    }
+
+                    if (achievement._parsedTrigger) {
+                        const conditionMet = rc_evaluate_trigger(achievement._parsedTrigger, peekFn);
+                        if (conditionMet) {
+                            this.awardAchievement(achievement);
+                        }
+                    }
+                }
             }
         }
     }
@@ -211,12 +282,26 @@ class RetroAchievements {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         this.gameData = data;
-        if (data.Achievements && Array.isArray(data.Achievements)) {
+
+        const patchData = data.PatchData || data;
+        if (patchData.Achievements && Array.isArray(patchData.Achievements)) {
+            this.achievements = patchData.Achievements;
+        } else if (data.Achievements && Array.isArray(data.Achievements)) {
             this.achievements = data.Achievements;
-            if (this.ejs.debug) console.log(`[RetroAchievements] Loaded ${this.achievements.length} achievements`);
         } else {
             this.achievements = [];
         }
+
+        this.richPresenceScript = patchData.RichPresencePatch || patchData.RichPresence || data.RichPresencePatch || data.RichPresence || data.rich_presence || "";
+
+        for (const ach of this.achievements) {
+            if (ach.MemAddr) {
+                ach._parsedTrigger = rc_parse_trigger(ach.MemAddr);
+            }
+        }
+
+        if (this.ejs.debug) console.log(`[RetroAchievements] Loaded ${this.achievements.length} achievements & Rich Presence script.`);
+
         return data;
     }
 
