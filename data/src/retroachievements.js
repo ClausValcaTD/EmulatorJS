@@ -1,5 +1,9 @@
+function getProxiedUrl(targetUrl) {
+  return `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+}
+
 async function loginRA(username, password) {
-    const url = `https://retroachievements.org/dorequest.php?r=login&u=${encodeURIComponent(username)}&p=${encodeURIComponent(password)}`;
+    const url = getProxiedUrl(`https://retroachievements.org/dorequest.php?r=login&u=${encodeURIComponent(username)}&p=${encodeURIComponent(password)}`);
     const res = await fetch(url);
     const data = await res.json();
     if (data.Success) {
@@ -10,6 +14,22 @@ async function loginRA(username, password) {
     } else {
         throw new Error(data.Error || 'Invalid credentials');
     }
+}
+
+async function getUserPoints(username, token) {
+    const targetUrl = `https://retroachievements.org/API/API_GetUserPoints.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(token)}`;
+    const url = getProxiedUrl(targetUrl);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+}
+
+async function getUserRecentlyPlayedGames(username, token, count = 10) {
+    const targetUrl = `https://retroachievements.org/API/API_GetUserRecentlyPlayedGames.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(token)}&c=${count}`;
+    const url = getProxiedUrl(targetUrl);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
 }
 
 import { md5 } from "./utils.js";
@@ -134,7 +154,7 @@ class RetroAchievements {
                 + `&y=${encodeURIComponent(this.token)}`
                 + `&h=${this.hardcore ? 1 : 0}`
                 + `&m=${this.romMd5}`;
-            const res = await fetch(url);
+            const res = await fetch(getProxiedUrl(url));
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             const unlocks = (this.hardcore ? data.HardcoreUnlocks : data.Unlocks) || data.Unlocks || data.HardcoreUnlocks || [];
@@ -180,7 +200,7 @@ class RetroAchievements {
                 + `&t=${encodeURIComponent(this.token)}`
                 + `&g=${this.gameId}`
                 + `&m=${encodeURIComponent(richText)}`;
-            await fetch(url);
+            await fetch(getProxiedUrl(url));
             if (this.ejs.debug) console.log("[RetroAchievements] Pinged Rich Presence:", richText);
         } catch (e) {
             if (this.ejs.debug) console.warn("[RetroAchievements] Ping failed:", e);
@@ -252,7 +272,7 @@ class RetroAchievements {
                 + `&a=${numericId}`
                 + `&h=${this.hardcore ? 1 : 0}`
                 + `&m=${this.romMd5}`;
-            const res = await fetch(url);
+            const res = await fetch(getProxiedUrl(url));
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             if (this.ejs.debug) console.log("[RetroAchievements] Awarded:", achievement.Title || achievement.title, data);
@@ -267,7 +287,7 @@ class RetroAchievements {
         if (this.username && this.token) {
             url += `&z=${encodeURIComponent(this.username)}&y=${encodeURIComponent(this.token)}`;
         }
-        const response = await fetch(url);
+        const response = await fetch(getProxiedUrl(url));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         return data.GameID || data.gameID || data.ID || 0;
@@ -278,7 +298,7 @@ class RetroAchievements {
         if (this.username && this.token) {
             url += `&z=${encodeURIComponent(this.username)}&y=${encodeURIComponent(this.token)}`;
         }
-        const response = await fetch(url);
+        const response = await fetch(getProxiedUrl(url));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json();
         this.gameData = data;
@@ -427,4 +447,4 @@ class RetroAchievements {
     }
 }
 
-export { RetroAchievements, loginRA };
+export { RetroAchievements, loginRA, getUserPoints, getUserRecentlyPlayedGames, getProxiedUrl };
