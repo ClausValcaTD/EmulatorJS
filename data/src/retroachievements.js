@@ -1,6 +1,25 @@
+
+async function loginRA(username, password) {
+    const url = `https://retroachievements.org/dorequest.php?r=login&u=${encodeURIComponent(username)}&p=${encodeURIComponent(password)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.Success) {
+        localStorage.setItem('ra_user', data.User);
+        localStorage.setItem('ra_token', data.Token);
+        localStorage.setItem('ra_score', data.Score || 0);
+        return data;
+    } else {
+        throw new Error(data.Error || 'Invalid credentials');
+    }
+}
+
 import { md5 } from "./utils.js";
 
 class RetroAchievements {
+    static async loginRA(username, password) {
+        return await loginRA(username, password);
+    }
+
     constructor(ejs) {
         this.ejs = ejs;
         this.baseUrl = "https://retroachievements.org/dorequest.php";
@@ -15,8 +34,14 @@ class RetroAchievements {
 
     loadConfig() {
         try {
+            const raUser = localStorage.getItem("ra_user");
+            const raToken = localStorage.getItem("ra_token");
             const raw = localStorage.getItem("ejs-retroachievements-config");
-            if (raw) {
+            if (raUser && raToken) {
+                this.username = raUser;
+                this.token = raToken;
+                this.hardcore = raw ? (JSON.parse(raw).hardcore === true) : false;
+            } else if (raw) {
                 const config = JSON.parse(raw);
                 this.username = config.username || "";
                 this.token = config.token || "";
@@ -317,4 +342,4 @@ class RetroAchievements {
     }
 }
 
-export { RetroAchievements };
+export { RetroAchievements, loginRA };
