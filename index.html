@@ -1108,36 +1108,82 @@ function updateRaUI() {
   }
 }
 
-function renderAchievementsPage() {
+async function renderAchievementsPage() {
   updateRaUI();
 
-  // Show demo achievement cards
-  const grid=document.getElementById('achGrid');
-  const badge=document.getElementById('gameCountBadge2');
-  const demos=[
-    {name:'First Steps',desc:'Complete the tutorial',points:5,earned:true},
-    {name:'Speed Runner',desc:'Finish a level in under 60s',points:25,earned:false},
-    {name:'Collector',desc:'Find all hidden items',points:50,earned:true},
-    {name:'No Damage',desc:'Clear a stage without getting hit',points:100,earned:false},
-  ];
-  badge.textContent=`${demos.filter(d=>d.earned).length} / ${demos.length} earned`;
-  grid.innerHTML='';
-  demos.forEach(a=>{
-    const d=document.createElement('div');
-    d.className='ach-card'+(a.earned?' earned':'');
-    d.innerHTML=`
-      <div class="ach-card-icon">
-        <svg viewBox="0 0 24 24" ${a.earned?'fill="var(--amber)" stroke="none"':'fill="none" stroke="var(--text3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"'}>
-          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
-        </svg>
-      </div>
-      <div class="ach-card-body">
-        <div class="ach-card-name">${a.name}</div>
-        <div class="ach-card-desc">${a.desc}</div>
-        <div class="ach-card-points">⭐ ${a.points} pts${a.earned?' · Earned':''}</div>
-      </div>`;
-    grid.appendChild(d);
-  });
+  const grid = document.getElementById('achGrid');
+  const badge = document.getElementById('gameCountBadge2');
+  const raUser = localStorage.getItem('ra_user');
+  const raToken = localStorage.getItem('ra_token');
+
+  if (!raUser || !raToken) {
+    badge.textContent = '';
+    grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text3); padding: 40px 0;">Log in above to view your RetroAchievements account data and recent games.</div>';
+    return;
+  }
+
+  grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text3); padding: 40px 0;">Loading achievements…</div>';
+
+  try {
+    const { getUserRecentlyPlayedGames } = await import('./data/src/retroachievements.js');
+    const recentGames = await getUserRecentlyPlayedGames(raUser, raToken, 10);
+
+    grid.innerHTML = '';
+
+    if (!Array.isArray(recentGames) || recentGames.length === 0) {
+      badge.textContent = '0 games';
+      grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: var(--text3); padding: 40px 0;">No recently played games found.</div>';
+      return;
+    }
+
+    badge.textContent = `${recentGames.length} recent game${recentGames.length === 1 ? '' : 's'}`;
+
+    recentGames.forEach(item => {
+      const title = item.Title || 'Unknown Game';
+      const consoleName = item.ConsoleName || '';
+      const numAch = item.NumAchieved || item.NumAchievedHardcore || 0;
+      const totalAch = item.NumPossibleAchievements || 0;
+      const score = item.ScoreAchieved || item.ScoreAchievedHardcore || 0;
+      const possibleScore = item.PossibleScore || 0;
+      const lastPlayed = item.LastPlayed ? item.LastPlayed : '';
+
+      let badgeUrl = '';
+      if (item.ImageIcon) {
+        badgeUrl = item.ImageIcon.startsWith('http') ? item.ImageIcon : `https://media.retroachievements.org${item.ImageIcon}`;
+      } else if (item.ImageTitle) {
+        badgeUrl = item.ImageTitle.startsWith('http') ? item.ImageTitle : `https://media.retroachievements.org${item.ImageTitle}`;
+      }
+
+      const card = document.createElement('div');
+      card.className = 'ach-card' + (numAch > 0 ? ' earned' : '');
+
+      const imgHtml = badgeUrl
+        ? `<img src="${badgeUrl}" alt="Game Icon" style="width:44px;height:44px;border-radius:10px;object-fit:cover;" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';">
+           <div class="ach-card-icon" style="display:none">
+             <svg viewBox="0 0 24 24" ${numAch > 0 ? 'fill="var(--amber)" stroke="none"' : 'fill="none" stroke="var(--text3)" stroke-width="1.5"'}>
+               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+             </svg>
+           </div>`
+        : `<div class="ach-card-icon">
+             <svg viewBox="0 0 24 24" ${numAch > 0 ? 'fill="var(--amber)" stroke="none"' : 'fill="none" stroke="var(--text3)" stroke-width="1.5"'}>
+               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z"/>
+             </svg>
+           </div>`;
+
+      card.innerHTML = `
+        ${imgHtml}
+        <div class="ach-card-body">
+          <div class="ach-card-name">${title} ${consoleName ? `<span style="font-size:11px;color:var(--text3);font-weight:normal">(${consoleName})</span>` : ''}</div>
+          <div class="ach-card-desc">${numAch} / ${totalAch} achievements unlocked</div>
+          <div class="ach-card-points">🏆 ${score} / ${possibleScore} pts${lastPlayed ? ` · ${lastPlayed}` : ''}</div>
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+  } catch (err) {
+    console.error('[RetroAchievements] Failed to load recent games:', err);
+    grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--red); padding: 40px 0;">Failed to load achievements: ${err.message || 'Unknown error'}</div>`;
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -1283,7 +1329,7 @@ document.getElementById('loginRaBtn').onclick = async (e) => {
     const { loginRA } = await import('./data/src/retroachievements.js');
     await loginRA(u, p);
     document.getElementById('raPassword').value = '';
-    updateRaUI();
+    await renderAchievementsPage();
   } catch (err) {
     errEl.textContent = err.message || 'Invalid credentials';
     errEl.style.display = 'block';
@@ -1298,7 +1344,7 @@ document.getElementById('logoutRaBtn').onclick = () => {
   localStorage.removeItem('ra_token');
   localStorage.removeItem('ra_score');
   localStorage.removeItem('ejs-retroachievements-config');
-  updateRaUI();
+  renderAchievementsPage();
 };
 
 // ══════════════════════════════════════════════
