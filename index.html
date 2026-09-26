@@ -1125,7 +1125,7 @@ function updateRaUI() {
     }
     const rankEl = document.getElementById('raProfileRank');
     if (rankEl) {
-      rankEl.textContent = (raRank && raRank !== '—') ? `Rank: ${raRank}` : 'Rank: —';
+      rankEl.textContent = (raRank && raRank !== '—') ? `Rank: #${raRank}` : 'Rank: —';
     }
   } else {
     loginWrap.classList.remove('hidden');
