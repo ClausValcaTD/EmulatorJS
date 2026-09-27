@@ -1,11 +1,31 @@
 function getProxiedUrl(targetUrl) {
-  return `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+}
+
+async function fetchWithCorsProxy(targetUrl) {
+  const proxies = [
+    (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+  ];
+
+  let lastError = null;
+  for (const getProxy of proxies) {
+    try {
+      const proxyUrl = getProxy(targetUrl);
+      const res = await fetch(proxyUrl);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw new Error(lastError ? lastError.message : 'All CORS proxies failed to fetch.');
 }
 
 async function loginRA(username, password) {
-    const url = getProxiedUrl(`https://retroachievements.org/dorequest.php?r=login&u=${encodeURIComponent(username)}&p=${encodeURIComponent(password)}`);
-    const res = await fetch(url);
-    const data = await res.json();
+    const targetUrl = `https://retroachievements.org/dorequest.php?r=login&u=${encodeURIComponent(username)}&p=${encodeURIComponent(password)}`;
+    const data = await fetchWithCorsProxy(targetUrl);
     if (data.Success) {
         localStorage.setItem('ra_user', data.User);
         localStorage.setItem('ra_token', data.Token);
@@ -18,13 +38,9 @@ async function loginRA(username, password) {
 
 async function loginWithApiKey(username, apiKey) {
   const targetUrl = `https://retroachievements.org/API/API_GetUserSummary.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(apiKey)}`;
-  const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`;
 
-  const res = await fetch(proxiedUrl);
-  const data = await res.json();
+  const data = await fetchWithCorsProxy(targetUrl);
 
-  // RetroAchievements returns TotalPoints or ID on valid authentication
-  // On invalid key, it returns { message: "Unauthenticated." } or status 419/401
   if (data && (data.TotalPoints !== undefined || data.Points !== undefined || data.ID !== undefined)) {
     const hardcore = data.TotalPoints ?? data.Points ?? 0;
     const softcore = data.TotalSoftcorePoints ?? data.SoftcorePoints ?? 0;
@@ -51,18 +67,12 @@ async function loginWithApiKey(username, apiKey) {
 
 async function getUserPoints(username, token) {
     const targetUrl = `https://retroachievements.org/API/API_GetUserPoints.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(token)}`;
-    const url = getProxiedUrl(targetUrl);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    return await fetchWithCorsProxy(targetUrl);
 }
 
 async function getUserRecentlyPlayedGames(username, token, count = 10) {
     const targetUrl = `https://retroachievements.org/API/API_GetUserRecentlyPlayedGames.php?u=${encodeURIComponent(username)}&y=${encodeURIComponent(token)}&c=${count}`;
-    const url = getProxiedUrl(targetUrl);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
+    return await fetchWithCorsProxy(targetUrl);
 }
 
 import { md5 } from "./utils.js";
@@ -191,9 +201,7 @@ class RetroAchievements {
                 + `&y=${encodeURIComponent(this.token)}`
                 + `&h=${this.hardcore ? 1 : 0}`
                 + `&m=${this.romMd5}`;
-            const res = await fetch(getProxiedUrl(url));
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
+            const data = await fetchWithCorsProxy(url);
             const unlocks = (this.hardcore ? data.HardcoreUnlocks : data.Unlocks) || data.Unlocks || data.HardcoreUnlocks || [];
             if (Array.isArray(unlocks)) {
                 unlocks.forEach(item => {
@@ -237,7 +245,7 @@ class RetroAchievements {
                 + `&t=${encodeURIComponent(this.token)}`
                 + `&g=${this.gameId}`
                 + `&m=${encodeURIComponent(richText)}`;
-            await fetch(getProxiedUrl(url));
+            await fetchWithCorsProxy(url);
             if (this.ejs.debug) console.log("[RetroAchievements] Pinged Rich Presence:", richText);
         } catch (e) {
             if (this.ejs.debug) console.warn("[RetroAchievements] Ping failed:", e);
@@ -309,9 +317,7 @@ class RetroAchievements {
                 + `&a=${numericId}`
                 + `&h=${this.hardcore ? 1 : 0}`
                 + `&m=${this.romMd5}`;
-            const res = await fetch(getProxiedUrl(url));
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const data = await res.json();
+            const data = await fetchWithCorsProxy(url);
             if (this.ejs.debug) console.log("[RetroAchievements] Awarded:", achievement.Title || achievement.title, data);
         } catch (e) {
             console.warn("[RetroAchievements] Failed to submit award:", e);
@@ -324,9 +330,7 @@ class RetroAchievements {
         if (this.username && this.token) {
             url += `&z=${encodeURIComponent(this.username)}&y=${encodeURIComponent(this.token)}`;
         }
-        const response = await fetch(getProxiedUrl(url));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
+        const data = await fetchWithCorsProxy(url);
         return data.GameID || data.gameID || data.ID || 0;
     }
 
@@ -335,9 +339,7 @@ class RetroAchievements {
         if (this.username && this.token) {
             url += `&z=${encodeURIComponent(this.username)}&y=${encodeURIComponent(this.token)}`;
         }
-        const response = await fetch(getProxiedUrl(url));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
+        const data = await fetchWithCorsProxy(url);
         this.gameData = data;
 
         const patchData = data.PatchData || data;
@@ -484,4 +486,4 @@ class RetroAchievements {
     }
 }
 
-export { RetroAchievements, loginRA, loginWithApiKey, getUserPoints, getUserRecentlyPlayedGames, getProxiedUrl };
+export { RetroAchievements, loginRA, loginWithApiKey, getUserPoints, getUserRecentlyPlayedGames, getProxiedUrl, fetchWithCorsProxy };
